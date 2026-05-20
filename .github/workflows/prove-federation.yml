@@ -1,0 +1,41 @@
+name: prove-federation
+on: { workflow_dispatch: {} }
+permissions: { id-token: write, contents: read }
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.CPC_FLEET_APP_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: az account show
+      - run: az ad sp show --id ${{ vars.CPC_FLEET_APP_ID }} --query "{displayName:displayName, appId:appId}"
+      # - name: Prove Graph access (no W365 needed)
+      #   run: |
+      #     TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
+      #     curl -sS -H "Authorization: Bearer $TOKEN" \
+      #       "https://graph.microsoft.com/v1.0/organization" \
+      #       | jq '.value[0] | {displayName, tenantType, verifiedDomains: .verifiedDomains | map(.name)}'
+      - name: Decode token roles
+        run: |
+          TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
+          PAYLOAD=$(echo $TOKEN | cut -d. -f2)
+          # Pad to multiple of 4 for base64
+          PAYLOAD="${PAYLOAD}$(printf '%*s' $(( (4 - ${#PAYLOAD} % 4) % 4 )) | tr ' ' '=')"
+          echo $PAYLOAD | base64 -d 2>/dev/null | jq '{aud, iss, appid, roles}'
+      - name: List CPCs via Graph
+        run: |
+          TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
+          curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "https://graph.microsoft.com/v1.0/deviceManagement/virtualEndpoint/cloudPCs" \
+            | jq '.value | length'
+      - name: List CPCs via Graph (with full error)
+        run: |
+          TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
+          curl -sS -H "Authorization: Bearer $TOKEN" \
+            "https://graph.microsoft.com/v1.0/deviceManagement/virtualEndpoint/cloudPCs" \
+            -w "\n---\nHTTP %{http_code}\n"
